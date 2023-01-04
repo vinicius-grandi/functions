@@ -1,18 +1,61 @@
-process.env.FIREBASE_DATABASE_EMULATOR_HOST = "127.0.0.1:9000";
-
 import * as functions from "../../src";
 import * as firebaseFunctionTest from "firebase-functions-test";
+import {resolve} from "path";
+import {config} from "dotenv";
+import {database} from "firebase-admin";
+import {expect} from "chai";
 
-const test = firebaseFunctionTest({
-  projectId: "ct-ordo-realitas",
-  databaseURL: "https://ct-ordo-realitas-default-rtdb.firebaseio.com",
-  storageBucket: "ct-ordo-realitas.appspot.com",
+config({
+  path: resolve(".env"),
 });
+
+const test = firebaseFunctionTest();
 
 const updateCoffins = test.wrap(functions.updateCoffins);
 
 
 describe("devil coffins", () => {
+  const sessionRef = "/sessions/first";
+  const nextDevil = "c";
+  const currentDevil = "b";
+
+  before(() => {
+    database()
+        .ref(`${sessionRef}`)
+        .set({
+          players: {
+            a: {
+              existencePoints: 6,
+            },
+            b: {
+              existencePoints: 6,
+            },
+            c: {
+              existencePoints: 6,
+            },
+            d: {
+              existencePoints: 6,
+            },
+            e: {
+              existencePoints: 6,
+            },
+          },
+          devil: currentDevil,
+          nextDevil,
+          targets: 6,
+          coffins: [...Array.from(Array(11).fill({
+            selected: false,
+          })), {
+            selected: true,
+            player: "a",
+          }]});
+  });
+
+  after(async () => {
+    test.cleanup();
+    // await database().ref(sessionRef).remove();
+  });
+
   const beforeSnap = test.database.makeDataSnapshot({
     phase: "votingTime",
   }, "/countdowns/first");
@@ -22,13 +65,25 @@ describe("devil coffins", () => {
 
   const change = test.makeChange(beforeSnap, afterSnap);
 
-  it("updates values when game phase is changed to discussionTime",
+  it("updates game state on phase change",
       async () => {
-        const response = await updateCoffins(change, {
+        await updateCoffins(change, {
           params: {
             session: "first",
           },
         });
-        console.log(response);
+        const sessionSnap = await database().ref(sessionRef).get();
+        const session = sessionSnap.val();
+
+        // players inside selected coffins will lose existence points
+        expect(session.players.a.existencePoints).to.be.eq(5);
+
+        // value from "nextDevil" is assigned to "devil"
+        // and the current one becomes the "lastDevil"
+        expect(session.devil).to.be.eq(nextDevil);
+        expect(session.lastDevil).to.be.eq(currentDevil);
+
+        // increase target number
+        expect(session.targets).to.be.eq(7);
       });
 });
