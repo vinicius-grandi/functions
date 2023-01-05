@@ -55,7 +55,15 @@ export const updateCoffins = functions.database
         return null;
       }
       const db = admin.database(app);
-      return Promise.all([updateDevil(), updateCoffins(), updateTargets()]);
+      try {
+        await updateDevil();
+        await updateCoffins();
+        await updateTargets();
+        return null;
+      } catch (error) {
+        functions.logger.error(error);
+        return null;
+      }
 
       /** @return {string} */
       function currentSessionRef(): string {
@@ -64,9 +72,12 @@ export const updateCoffins = functions.database
       /** @return {Promise<void>} */
       function updateDevil(): Promise<TransactionResult> {
         return db.ref(`${currentSessionRef()}`).transaction((session) => {
-          return {
+          return session === null ? null : {
             ...session,
-            devil: session.nextDevil,
+            devil: session.nextDevil ?? Object.keys(session.players).find(
+                (player) =>
+                  (player !== session.devil) && (player !== session.lastDevil)
+            ),
             lastDevil: session.devil,
             nextDevil: null,
           };
@@ -123,7 +134,10 @@ export const updateCoffins = functions.database
           return selectedPlayers.map(async (player) => {
             await db
                 .ref(`${currentSessionRef()}/players/${player}/existencePoints`)
-                .set(admin.database.ServerValue.increment(-1));
+                .transaction((existencePoints) => {
+                  return existencePoints === null ?
+                  null : existencePoints - 1;
+                });
           });
         }
       }
