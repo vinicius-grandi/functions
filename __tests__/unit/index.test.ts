@@ -54,7 +54,7 @@ describe("devil coffins", () => {
 
   after(async () => {
     test.cleanup();
-    // await database().ref(sessionRef).remove();
+    await database().ref(sessionRef).remove();
   });
 
   const beforeSnap = test.database.makeDataSnapshot({
