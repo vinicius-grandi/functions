@@ -43,12 +43,13 @@ describe("devil coffins", () => {
           devil: currentDevil,
           nextDevil,
           targets: 6,
-          coffins: [...Array.from(Array(11).fill({
-            selected: false,
-          })), {
-            selected: true,
-            player: "a",
-          }]});
+          coffins: [
+            ...Array.from(Array(6).fill({selected: false})),
+            ...Array.from(Array(5).fill({selected: true})),
+            {
+              selected: true,
+              player: "a",
+            }]});
   });
 
   after(async () => {
@@ -85,5 +86,13 @@ describe("devil coffins", () => {
 
         // increase target number
         expect(session.targets).to.be.eq(7);
+        expect(
+            session.coffins.filter(
+                ({selected}: { selected: boolean }) => selected).length
+        ).to.be.equal(7);
+        expect(
+            session.coffins.some(
+                ({player}: { player: string }) => player === session.lastDevil)
+        ).to.be.true;
       });
 });

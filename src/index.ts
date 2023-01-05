@@ -5,10 +5,18 @@ import {resolve} from "path";
 import {config} from "dotenv";
 import type {TransactionResult} from "@firebase/database-types";
 
+if (process.env.NODE_ENV !== "production") {
+  process.env.FIREBASE_DATABASE_EMULATOR_HOST = "127.0.0.1:9000";
+}
+
+type Coffin = {
+  selected: boolean;
+  player: string | number;
+};
+
 config({
   path: resolve(".env"),
 });
-
 
 const configAdmin = {
   credential: admin.credential.cert({
@@ -22,10 +30,8 @@ const configAdmin = {
   databaseURL: process.env.DATABASE_URL ?? ".",
 };
 
-const app = getApps().length === 0 ?
-admin.initializeApp(configAdmin) :
-getApps()[0];
-
+const app =
+  getApps().length === 0 ? admin.initializeApp(configAdmin) : getApps()[0];
 
 // Start writing functions
 // https://firebase.google.com/docs/functions/typescript
@@ -45,19 +51,19 @@ export const updateCoffins = functions.database
     .ref("/countdowns/{session}")
     .onUpdate(async (snap, context) => {
       const nextPhase: "discussionTime" | "votingTime" = snap.after.val().phase;
-      const db = admin.database(app);
-      const currentSessionRef = `sessions/${context.params.session}`;
-      if (nextPhase === "discussionTime") {
-        return Promise.all(
-            [updateDevil(), updateCoffins(), updateTargets()]
-        );
+      if (nextPhase === "votingTime") {
+        return null;
       }
-      return null;
-      /**
-       * @return {Promise<void>}
-       */
+      const db = admin.database(app);
+      return Promise.all([updateDevil(), updateCoffins(), updateTargets()]);
+
+      /** @return {string} */
+      function currentSessionRef(): string {
+        return `sessions/${context.params.session}`;
+      }
+      /** @return {Promise<void>} */
       function updateDevil(): Promise<TransactionResult> {
-        return db.ref(`${currentSessionRef}`).transaction((session) => {
+        return db.ref(`${currentSessionRef()}`).transaction((session) => {
           return {
             ...session,
             devil: session.nextDevil,
@@ -67,40 +73,58 @@ export const updateCoffins = functions.database
         });
       }
 
-      /**
-       * @return {Promise<void>}
-       */
-      function updateTargets(): Promise<void> {
-        return db
-            .ref(`${currentSessionRef}/targets`)
-            .set(admin.database.ServerValue.increment(1));
+      /**  @return {Promise<TransactionResult>} */
+      function updateTargets(): Promise<TransactionResult> {
+        return db.ref(
+            `${currentSessionRef()}/targets`).transaction((targets) => {
+          if (targets < 12) {
+            return targets + 1;
+          }
+        });
       }
 
-      /**
-       * @return { Promise<void>[] }
-       */
+      /** @return { Promise<void>[] } */
       async function updateCoffins(): Promise<Promise<void>[]> {
-        const coffins: {
-          selected: boolean;
-          player: string | number;
-        }[] = (await db.ref(`${currentSessionRef}/coffins`).get()).val();
         const selectedPlayers: string[] = [];
         const unselectedCoffins: number[] = [];
 
-        coffins.forEach(({selected, player}, idx) => {
+        (await coffins()).forEach(({selected, player}, idx) => {
           if (selected && typeof player === "string") {
             selectedPlayers.push(player);
-          }
-          if (selected === false) {
+          } else {
             unselectedCoffins.push(idx);
           }
         });
-
-        return selectedPlayers.map(async (player) => {
-          await db
-              .ref(`${currentSessionRef}/players/${player}/existencePoints`)
-              .set(admin.database.ServerValue.increment(-1));
+        await selectAvailableTarget();
+        return decreaseExistencePoints();
+        /** @return {Promise<Coffin[]>} */
+        async function coffins(): Promise<Coffin[]> {
+          return (await db.ref(coffinsRef()).get()).val();
         }
-        );
+        /** @return {Promise<void>} */
+        async function selectAvailableTarget(): Promise<void> {
+          if (unselectedCoffins.length > 0) {
+            const lastDevil = (
+              await db.ref(`${currentSessionRef()}/lastDevil`).get()
+            ).val();
+            await db.ref(`${coffinsRef()}/${unselectedCoffins[0]}`).update({
+              selected: true,
+              player: lastDevil,
+            });
+          }
+        }
+
+        /** @return {string} */
+        function coffinsRef(): string {
+          return `${currentSessionRef()}/coffins`;
+        }
+        /** @return {Promise<void>[]} */
+        function decreaseExistencePoints(): Promise<void>[] {
+          return selectedPlayers.map(async (player) => {
+            await db
+                .ref(`${currentSessionRef()}/players/${player}/existencePoints`)
+                .set(admin.database.ServerValue.increment(-1));
+          });
+        }
       }
     });
